@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 10;
 
 export async function POST() {
-  console.log("[SCAN] start", new Date());
   const mode = getMode();
+  console.log(`[SCAN] ${mode} start`, new Date().toISOString());
   try {
     if (mode === "LIVE") {
       const { count, skipped, errors, results } = await scanLive();
