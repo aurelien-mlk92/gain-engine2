@@ -26,19 +26,22 @@ export type RefProduct = {
   ean: string;
   query: string;
   image: string;
+  basePrice: number;
+  exclude?: string[];
   asin?: string;
 };
 
-// Produits de référence suivis par le scanner (recherche par EAN/nom)
+// Produits de référence suivis par le scanner. basePrice sert de plancher
+// anti-accessoire (offre < 35% du prix de base = rejetée).
 export const CATALOG: RefProduct[] = [
-  { name: "Bosch Perceuse GSB 13 RE", ean: "3165140371940", query: "Bosch GSB 13 RE", image: "https://picsum.photos/seed/gsb13re/80/80" },
-  { name: "Dyson V8 Absolute", ean: "5025155025421", query: "Dyson V8 Absolute", image: "https://picsum.photos/seed/dysonv8/80/80" },
-  { name: "Karcher K5 Nettoyeur Haute Pression", ean: "4054278608730", query: "Karcher K5", image: "https://picsum.photos/seed/k5/80/80" },
-  { name: "Makita DDF485 Perceuse 18V", ean: "0088381860307", query: "Makita DDF485", image: "https://picsum.photos/seed/ddf485/80/80" },
-  { name: "Ninja Foodi MAX AF400EU", ean: "0622356261791", query: "Ninja Foodi AF400EU", image: "https://picsum.photos/seed/af400/80/80" },
-  { name: "Tefal Ingenio Batterie 10 pièces", ean: "3168430310551", query: "Tefal Ingenio 10 pieces", image: "https://picsum.photos/seed/ingenio/80/80" },
-  { name: "Rowenta X-Force Flex 9.60", ean: "3221614006661", query: "Rowenta X-Force Flex 9.60", image: "https://picsum.photos/seed/xforce/80/80" },
-  { name: "Philips Hue White E27 x2", ean: "8719514289193", query: "Philips Hue White E27 pack 2", image: "https://picsum.photos/seed/hue/80/80" },
+  { name: "Bosch Perceuse GSB 13 RE", ean: "3165140371940", query: "Bosch GSB 13 RE", basePrice: 89, exclude: ["foret", "meche", "embout", "coffret"], image: "https://picsum.photos/seed/gsb13re/80/80" },
+  { name: "Dyson V8 Absolute", ean: "5025155025421", query: "Dyson V8 Absolute", basePrice: 299, exclude: ["brosse", "filtre", "batterie"], image: "https://picsum.photos/seed/dysonv8/80/80" },
+  { name: "Karcher K5 Nettoyeur Haute Pression", ean: "4054278608730", query: "Karcher K5", basePrice: 249, exclude: ["lance", "flexible", "buse"], image: "https://picsum.photos/seed/k5/80/80" },
+  { name: "Makita DDF485 Perceuse 18V", ean: "0088381860307", query: "Makita DDF485", basePrice: 119, exclude: ["foret", "batterie", "chargeur"], image: "https://picsum.photos/seed/ddf485/80/80" },
+  { name: "Ninja Foodi MAX AF400EU", ean: "0622356261791", query: "Ninja Foodi AF400EU", basePrice: 149, exclude: ["panier", "grille"], image: "https://picsum.photos/seed/af400/80/80" },
+  { name: "Tefal Ingenio Batterie 10 pièces", ean: "3168430310551", query: "Tefal Ingenio 10 pieces", basePrice: 99, exclude: ["poignee", "couvercle"], image: "https://picsum.photos/seed/ingenio/80/80" },
+  { name: "Rowenta X-Force Flex 9.60", ean: "3221614006661", query: "Rowenta X-Force Flex 9.60", basePrice: 199, exclude: ["brosse", "filtre", "batterie"], image: "https://picsum.photos/seed/xforce/80/80" },
+  { name: "Philips Hue White E27 x2", ean: "8719514289193", query: "Philips Hue White E27 pack 2", basePrice: 19, exclude: ["telecommande"], image: "https://picsum.photos/seed/hue/80/80" },
 ];
 
 // Fiabilité des sources (pondère le score final)

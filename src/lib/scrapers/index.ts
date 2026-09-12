@@ -44,6 +44,39 @@ async function stampScan(ean: string, error: string | null, low?: number, high?:
   });
 }
 
+// Upsert par EAN : jamais de suppression, les anciennes données restent si échec
+async function upsertOpportunity(
+  product: RefProduct,
+  lowPrice: number,
+  highPrice: number,
+  highName: string,
+  url: string,
+  exploitable: boolean
+) {
+  const diffPercent = Math.round(((highPrice - lowPrice) / lowPrice) * 1000) / 10;
+  const data = {
+    title: `${product.name} - Amazon ${lowPrice.toFixed(2)}€ vs ${highName} ${highPrice.toFixed(2)}€`,
+    image: product.image,
+    ean: product.ean,
+    price_low: lowPrice,
+    price_high: highPrice,
+    diff_percent: diffPercent,
+    affiliate_url: url,
+    score: computeScore(Math.max(0, diffPercent), "amazon", highName),
+    source: `${LIVE_SOURCE_PREFIX}${highName}`,
+    is_exploitable: exploitable,
+  };
+  const existing = await prisma.opportunity.findFirst({
+    where: { ean: product.ean, source: { startsWith: LIVE_SOURCE_PREFIX } },
+  });
+  if (existing) {
+    await prisma.opportunity.update({ where: { id: existing.id }, data });
+  } else {
+    await prisma.opportunity.create({ data });
+  }
+  return diffPercent;
+}
+
 async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error: string }> {
   const [low, high] = await Promise.all([scrapeAmazon(product), scrapeManoMano(product)]);
 
@@ -58,38 +91,20 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error:
 
   const lowOffer = low.offer!;
   const highOffer = high.offer!;
+  const highName = highOffer.sourceName ?? "manomano";
+
   if (highOffer.price <= lowOffer.price) {
+    // Prix valides mais pas de marge : on garde quand même l'opportunité en
+    // LIVE (is_exploitable=false) pour que le dashboard reflète le réel
+    await upsertOpportunity(product, lowOffer.price, highOffer.price, highName, lowOffer.url, false);
     const error = `pas d'écart exploitable (${lowOffer.price}€ vs ${highOffer.price}€)`;
     await stampScan(product.ean, error, lowOffer.price, highOffer.price);
     return { error };
   }
 
-  const highName = highOffer.sourceName ?? "manomano";
-  const source = `${LIVE_SOURCE_PREFIX}${highName}`;
-  const diffPercent = Math.round(((highOffer.price - lowOffer.price) / lowOffer.price) * 1000) / 10;
-
-  const data = {
-    title: `${product.name} - Amazon ${lowOffer.price.toFixed(2)}€ vs ${highName} ${highOffer.price.toFixed(2)}€`,
-    image: product.image,
-    ean: product.ean,
-    price_low: lowOffer.price,
-    price_high: highOffer.price,
-    diff_percent: diffPercent,
-    affiliate_url: lowOffer.url,
-    score: computeScore(diffPercent, "amazon", highName),
-    source,
-  };
-
-  // Upsert par EAN : jamais de suppression, les anciennes données restent si échec
-  const existing = await prisma.opportunity.findFirst({
-    where: { ean: product.ean, source: { startsWith: LIVE_SOURCE_PREFIX } },
-  });
-  if (existing) {
-    await prisma.opportunity.update({ where: { id: existing.id }, data });
-  } else {
-    await prisma.opportunity.create({ data });
-  }
-
+  const diffPercent = await upsertOpportunity(
+    product, lowOffer.price, highOffer.price, highName, lowOffer.url, true
+  );
   await stampScan(product.ean, null, lowOffer.price, highOffer.price);
 
   return {
@@ -97,7 +112,7 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error:
     prixBas: lowOffer.price,
     prixHaut: highOffer.price,
     diffPercent,
-    source,
+    source: `${LIVE_SOURCE_PREFIX}${highName}`,
     urlOffre: lowOffer.url,
   };
 }
@@ -105,13 +120,14 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error:
 // Scan LIVE par batch : `limit` produits par invocation (budget 10 s Hobby).
 // Tri sur ScanState.lastScannedAt ASC, jamais scannés (NULL) d'abord ;
 // un produit tenté (même en échec) sort de la rotation pendant 1 h.
-export async function scanLive(limit = 2) {
+export async function scanLive(limit = 2, force = false) {
   const states = await prisma.scanState.findMany({
     where: { ean: { in: CATALOG.map((p) => p.ean) } },
   });
   const lastMap = new Map(states.map((s) => [s.ean, s.lastScannedAt]));
 
-  const cacheFloor = subHours(new Date(), CACHE_HOURS);
+  // force=true ignore le cache 1h (re-scan immédiat de tout le catalogue)
+  const cacheFloor = force ? new Date() : subHours(new Date(), CACHE_HOURS);
   const eligible = CATALOG.filter((p) => {
     const last = lastMap.get(p.ean);
     return !last || last < cacheFloor;

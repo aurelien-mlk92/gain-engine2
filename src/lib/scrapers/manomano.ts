@@ -5,7 +5,7 @@ import type { RefProduct, SourceResult } from "./types";
 // par Cloudflare sur Vercel). Priorité au prix ManoMano ; sinon l'offre la
 // moins chère hors Amazon (Amazon sert déjà de prix bas).
 export async function scrapeManoMano(product: RefProduct): Promise<SourceResult> {
-  const { items, error } = await getShoppingResults(product.query);
+  const { items, error } = await getShoppingResults(product);
   if (error) return { offer: null, error };
 
   const manomano = items.find((r) => /manomano/i.test(r.source ?? ""));

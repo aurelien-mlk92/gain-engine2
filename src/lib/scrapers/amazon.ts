@@ -19,7 +19,7 @@ const PRICE_INDEXES = [0, 1, 18];
 // Fallback sans Keepa : prix Amazon extrait des résultats Google Shopping
 // (même requête SerpAPI que le prix haut, donc aucun coût supplémentaire).
 async function amazonViaShopping(product: RefProduct): Promise<SourceResult> {
-  const { items, error } = await getShoppingResults(product.query);
+  const { items, error } = await getShoppingResults(product);
   if (error) return { offer: null, error: `MISSING_KEEPA_API_KEY + ${error}` };
 
   const amazon = items.filter((r) => /amazon/i.test(r.source ?? ""));

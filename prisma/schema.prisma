@@ -17,10 +17,11 @@ model Opportunity {
   price_high    Float
   diff_percent  Float
   affiliate_url String?
-  score         Int      @default(0)
-  source        String   @default("mock")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @default(now()) @updatedAt
+  score          Int      @default(0)
+  source         String   @default("mock")
+  is_exploitable Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
 }
 
 model ScanState {

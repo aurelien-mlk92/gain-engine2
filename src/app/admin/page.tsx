@@ -11,8 +11,18 @@ import {
   YAxis,
 } from "recharts";
 
+type ScanState = {
+  product: string;
+  ean: string;
+  lastScannedAt: string;
+  lastPriceLow: number | null;
+  lastPriceHigh: number | null;
+  lastError: string | null;
+};
+
 type Stats = {
   mode: "PAPER" | "LIVE";
+  scanStates: ScanState[];
   gainToday: number;
   profitToday: number;
   profit7d: number;
@@ -33,6 +43,7 @@ type Opportunity = {
   affiliate_url: string | null;
   score: number;
   source: string;
+  is_exploitable: boolean;
 };
 
 const eur = (n: number) =>
@@ -198,7 +209,10 @@ export default function AdminPage() {
                 </tr>
               )}
               {opportunities.map((o) => (
-                <tr key={o.id} className="border-b last:border-0">
+                <tr
+                  key={o.id}
+                  className={`border-b last:border-0 ${o.is_exploitable === false ? "opacity-50" : ""}`}
+                >
                   <td className="max-w-md py-3 pr-4">
                     <div className="flex items-center gap-3">
                       {o.image && (
@@ -222,7 +236,7 @@ export default function AdminPage() {
                           : "bg-slate-100 text-slate-600"
                       }`}
                     >
-                      +{o.diff_percent}%
+                      {o.diff_percent > 0 ? "+" : ""}{o.diff_percent}%
                     </span>
                   </td>
                   <td className="py-3 pr-4 font-semibold">{o.score}</td>
@@ -241,6 +255,46 @@ export default function AdminPage() {
           </table>
         </div>
       </div>
+
+      {stats && stats.scanStates.length > 0 && (
+        <div className="mt-8 rounded-2xl bg-white shadow">
+          <h2 className="px-6 pt-6 text-lg font-semibold">
+            Debug scan ({stats.scanStates.length})
+          </h2>
+          <div className="overflow-x-auto p-6">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase text-slate-500">
+                  <th className="pb-3 pr-4">Produit</th>
+                  <th className="pb-3 pr-4">Dernier scan</th>
+                  <th className="pb-3 pr-4">Prix bas</th>
+                  <th className="pb-3 pr-4">Prix haut</th>
+                  <th className="pb-3">Dernière erreur</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.scanStates.map((s) => (
+                  <tr key={s.ean} className="border-b last:border-0">
+                    <td className="py-3 pr-4 font-medium">{s.product}</td>
+                    <td className="py-3 pr-4 text-slate-500">
+                      {new Date(s.lastScannedAt).toLocaleString("fr-FR")}
+                    </td>
+                    <td className="py-3 pr-4">{s.lastPriceLow != null ? eur(s.lastPriceLow) : "—"}</td>
+                    <td className="py-3 pr-4">{s.lastPriceHigh != null ? eur(s.lastPriceHigh) : "—"}</td>
+                    <td className="py-3">
+                      {s.lastError ? (
+                        <span className="text-xs text-red-600">{s.lastError}</span>
+                      ) : (
+                        <span className="text-xs font-semibold text-emerald-600">OK</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

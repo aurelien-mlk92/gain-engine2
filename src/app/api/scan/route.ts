@@ -15,10 +15,11 @@ const json = (body: unknown, status = 200) =>
 async function run(req: NextRequest) {
   const mode = getMode();
   const limit = Math.min(4, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") ?? "2", 10) || 2));
+  const force = req.nextUrl.searchParams.get("force") === "1";
   console.log(`[SCAN] ${mode} start`, new Date().toISOString());
   try {
     if (mode === "LIVE") {
-      const { count, skipped, scanned, remaining, nextCursor, errors, results } = await scanLive(limit);
+      const { count, skipped, scanned, remaining, nextCursor, errors, results } = await scanLive(limit, force);
       console.log("[SCAN] batch", limit, "remaining", remaining);
       return json({
         success: true,

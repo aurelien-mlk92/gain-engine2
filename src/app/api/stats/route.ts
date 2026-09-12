@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { format, startOfDay, subDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { getMode } from "@/lib/mode";
+import { CATALOG } from "@/lib/scrapers/types";
 
 export const dynamic = "force-dynamic";
 
@@ -35,15 +36,27 @@ export async function GET() {
       return { day: format(day, "EEE d", { locale: fr }), profit: Math.round(pnl * 100) / 100 };
     });
 
-    const [opportunitiesCount, hotCount, scoreAgg, topCount] = await Promise.all([
+    const [opportunitiesCount, hotCount, scoreAgg, topCount, states] = await Promise.all([
       prisma.opportunity.count(),
       prisma.opportunity.count({ where: { diff_percent: { gt: 15 } } }),
       prisma.opportunity.aggregate({ _avg: { score: true } }),
       prisma.opportunity.count({ where: { score: { gt: 80 } } }),
+      prisma.scanState.findMany({ orderBy: { lastScannedAt: "desc" } }),
     ]);
+
+    const nameByEan = new Map(CATALOG.map((p) => [p.ean, p.name]));
+    const scanStates = states.map((s) => ({
+      product: nameByEan.get(s.ean) ?? s.ean,
+      ean: s.ean,
+      lastScannedAt: s.lastScannedAt,
+      lastPriceLow: s.lastPriceLow,
+      lastPriceHigh: s.lastPriceHigh,
+      lastError: s.lastError,
+    }));
 
     return NextResponse.json({
       mode: getMode(),
+      scanStates,
       gainToday: Math.round(gainToday * 100) / 100,
       profitToday: Math.round(gainToday * 100) / 100,
       profit7d: Math.round(profit7d * 100) / 100,
