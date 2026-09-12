@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Opportunity {
+  id            String   @id @default(cuid())
+  title         String
+  image         String?
+  ean           String?
+  price_low     Float
+  price_high    Float
+  diff_percent  Float
+  affiliate_url String?
+  score         Int      @default(0)
+  source        String   @default("mock")
+  createdAt     DateTime @default(now())
+}
+
+model Price {
+  id        String   @id @default(cuid())
+  symbol    String
+  price     Float
+  timestamp DateTime @default(now())
+
+  @@index([symbol, timestamp])
+}
+
+model PaperTrade {
+  id            String    @id @default(cuid())
+  symbol        String
+  entry_price   Float
+  current_price Float
+  quantity      Float     @default(1)
+  pnl           Float     @default(0)
+  pnl_percent   Float     @default(0)
+  status        String    @default("OPEN")
+  createdAt     DateTime  @default(now())
+  closedAt      DateTime?
+}

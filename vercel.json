@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/cron/scan", "schedule": "*/30 * * * *" },
+    { "path": "/api/cron/trade", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/alpha", "schedule": "0 * * * *" }
+  ]
+}
