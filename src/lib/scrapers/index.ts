@@ -155,12 +155,8 @@ export async function scanLive(limit = 2, force = false) {
     }
   });
 
-  // Curseur = lastScannedAt du dernier produit traité de ce batch
-  const lastEan = batch[batch.length - 1]?.ean;
-  const lastState = lastEan
-    ? await prisma.scanState.findUnique({ where: { ean: lastEan } })
-    : null;
-  const nextCursor = remaining > 0 ? (lastState?.lastScannedAt.toISOString() ?? null) : null;
+  // Curseur = lastScannedAt du batch (les produits viennent d'être estampillés)
+  const nextCursor = remaining > 0 && batch.length > 0 ? new Date().toISOString() : null;
 
   return {
     count: results.length,

@@ -1,7 +1,9 @@
 // Client HTTP des sources LIVE : timeout 8 s, log détaillé, pas de retry.
 // Aucun fallback mock ici : en MODE=LIVE une source en échec retourne une
 // erreur explicite, jamais de fausse donnée.
-const TIMEOUT_MS = 8000;
+// 5 s max : budget total fonction = 10 s (Hobby), il faut laisser la place
+// au cold start Prisma et aux upserts DB (fonction cdg1 -> DB eu-west-1)
+const TIMEOUT_MS = 5000;
 
 export type FetchJsonResult<T> = { data: T | null; error?: string };
 
