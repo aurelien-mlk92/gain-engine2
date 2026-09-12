@@ -107,7 +107,8 @@ export async function paperTrading() {
 }
 
 export async function alphaScoring() {
-  const opportunities = await prisma.opportunity.findMany();
+  // Ne re-score que les opportunités mock : les scores LIVE viennent du scraper
+  const opportunities = await prisma.opportunity.findMany({ where: { source: "mock" } });
   const alerts: string[] = [];
 
   for (const o of opportunities) {

@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 type Stats = {
+  mode: "PAPER" | "LIVE";
   gainToday: number;
   profitToday: number;
   profit7d: number;
@@ -60,17 +61,19 @@ export default function AdminPage() {
   const scanNow = async () => {
     setScanning(true);
     try {
-      await fetch("/api/cron/scan", { method: "POST" });
-      await fetch("/api/cron/alpha", { method: "POST" });
+      await fetch("/api/scan", { method: "POST" });
       await load();
     } finally {
       setScanning(false);
     }
   };
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    // Export depuis la DB (état courant), pas depuis le state React
+    const fresh: Opportunity[] = await fetch("/api/opportunities").then((r) => r.json());
+    const data = Array.isArray(fresh) ? fresh : opportunities;
     const header = "titre;prix_bas;prix_haut;diff_percent;score;source";
-    const rows = opportunities.map(
+    const rows = data.map(
       (o) =>
         `"${o.title.replace(/"/g, '""')}";${o.price_low};${o.price_high};${o.diff_percent};${o.score};${o.source}`
     );
@@ -90,8 +93,14 @@ export default function AdminPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold">Tableau de bord</h1>
-            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-              Mode PAPER
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                stats?.mode === "LIVE"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}
+            >
+              Mode {stats?.mode ?? "PAPER"}
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-500">

@@ -6,7 +6,7 @@ import { scanLive } from "@/lib/scrapers";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-async function run() {
+export async function POST() {
   const mode = getMode();
   try {
     if (mode === "LIVE") {
@@ -21,9 +21,5 @@ async function run() {
 }
 
 export async function GET() {
-  return run();
-}
-
-export async function POST() {
-  return run();
+  return POST();
 }

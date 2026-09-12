@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { format, startOfDay, subDays } from "date-fns";
 import { fr } from "date-fns/locale";
+import { getMode } from "@/lib/mode";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,7 @@ export async function GET() {
     ]);
 
     return NextResponse.json({
+      mode: getMode(),
       gainToday: Math.round(gainToday * 100) / 100,
       profitToday: Math.round(gainToday * 100) / 100,
       profit7d: Math.round(profit7d * 100) / 100,
