@@ -2,9 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { subHours } from "date-fns";
 import { scrapeAmazon } from "./amazon";
 import { scrapeManoMano } from "./manomano";
-import { CATALOG, SOURCE_RELIABILITY, type ScrapeResult } from "./types";
+import { CATALOG, SOURCE_RELIABILITY, type RefProduct, type ScanError, type ScrapeResult } from "./types";
 
-const LIVE_SOURCE = "amazon→manomano";
+const LIVE_SOURCE_PREFIX = "amazon→";
 const CACHE_HOURS = 1;
 
 function computeScore(diffPercent: number, low: string, high: string): number {
@@ -12,73 +12,85 @@ function computeScore(diffPercent: number, low: string, high: string): number {
   return Math.max(0, Math.min(100, Math.round(diffPercent * 1.5 + reliability)));
 }
 
-// Scan LIVE : Amazon (prix bas) vs ManoMano (prix haut) pour chaque produit
-// du catalogue. Cache DB 1 h : un produit déjà rafraîchi est sauté.
+async function scanProduct(product: RefProduct): Promise<ScrapeResult | { skipped: true } | { error: string }> {
+  const fresh = await prisma.opportunity.findFirst({
+    where: {
+      ean: product.ean,
+      source: { startsWith: LIVE_SOURCE_PREFIX },
+      updatedAt: { gte: subHours(new Date(), CACHE_HOURS) },
+    },
+  });
+  if (fresh) return { skipped: true };
+
+  const [low, high] = await Promise.all([scrapeAmazon(product), scrapeManoMano(product)]);
+
+  const errs: string[] = [];
+  if (!low.offer) errs.push(`amazon KO (${low.error})`);
+  if (!high.offer) errs.push(`comparateur KO (${high.error})`);
+  if (errs.length > 0) return { error: errs.join(", ") };
+
+  const lowOffer = low.offer!;
+  const highOffer = high.offer!;
+  if (highOffer.price <= lowOffer.price) {
+    return { error: `pas d'écart exploitable (${lowOffer.price}€ vs ${highOffer.price}€)` };
+  }
+
+  const highName = highOffer.sourceName ?? "manomano";
+  const source = `${LIVE_SOURCE_PREFIX}${highName}`;
+  const diffPercent = Math.round(((highOffer.price - lowOffer.price) / lowOffer.price) * 1000) / 10;
+
+  const data = {
+    title: `${product.name} - Amazon ${lowOffer.price.toFixed(2)}€ vs ${highName} ${highOffer.price.toFixed(2)}€`,
+    image: product.image,
+    ean: product.ean,
+    price_low: lowOffer.price,
+    price_high: highOffer.price,
+    diff_percent: diffPercent,
+    affiliate_url: lowOffer.url,
+    score: computeScore(diffPercent, "amazon", highName),
+    source,
+  };
+
+  // Upsert par EAN : jamais de suppression, les anciennes données restent si échec
+  const existing = await prisma.opportunity.findFirst({
+    where: { ean: product.ean, source: { startsWith: LIVE_SOURCE_PREFIX } },
+  });
+  if (existing) {
+    await prisma.opportunity.update({ where: { id: existing.id }, data });
+  } else {
+    await prisma.opportunity.create({ data });
+  }
+
+  return {
+    productName: product.name,
+    prixBas: lowOffer.price,
+    prixHaut: highOffer.price,
+    diffPercent,
+    source,
+    urlOffre: lowOffer.url,
+  };
+}
+
+// Scan LIVE : produits en parallèle (allSettled), cache DB 1 h par produit.
 export async function scanLive() {
+  const settled = await Promise.allSettled(CATALOG.map((p) => scanProduct(p)));
+
   const results: ScrapeResult[] = [];
-  const errors: string[] = [];
+  const errors: ScanError[] = [];
   let skipped = 0;
 
-  for (const product of CATALOG) {
-    const fresh = await prisma.opportunity.findFirst({
-      where: {
-        ean: product.ean,
-        source: LIVE_SOURCE,
-        updatedAt: { gte: subHours(new Date(), CACHE_HOURS) },
-      },
-    });
-    if (fresh) {
+  settled.forEach((s, i) => {
+    const name = CATALOG[i].name;
+    if (s.status === "rejected") {
+      errors.push({ product: name, error: `EXCEPTION_${String(s.reason)}` });
+    } else if ("skipped" in s.value) {
       skipped++;
-      continue;
-    }
-
-    const [low, high] = await Promise.all([
-      scrapeAmazon(product.query),
-      scrapeManoMano(product.query),
-    ]);
-
-    if (!low || !high) {
-      errors.push(
-        `${product.name}: ${!low ? "amazon KO" : ""}${!low && !high ? ", " : ""}${!high ? "manomano KO" : ""}`
-      );
-      continue;
-    }
-    if (high.price <= low.price) {
-      errors.push(`${product.name}: pas d'écart exploitable (${low.price}€ vs ${high.price}€)`);
-      continue;
-    }
-
-    const diffPercent = Math.round(((high.price - low.price) / low.price) * 1000) / 10;
-    const result: ScrapeResult = {
-      productName: product.name,
-      prixBas: low.price,
-      prixHaut: high.price,
-      diffPercent,
-      source: LIVE_SOURCE,
-      urlOffre: low.url,
-    };
-    results.push(result);
-
-    const data = {
-      title: `${product.name} - Amazon ${low.price.toFixed(2)}€ vs ManoMano ${high.price.toFixed(2)}€`,
-      image: product.image,
-      ean: product.ean,
-      price_low: low.price,
-      price_high: high.price,
-      diff_percent: diffPercent,
-      affiliate_url: low.url,
-      score: computeScore(diffPercent, "amazon", "manomano"),
-      source: LIVE_SOURCE,
-    };
-    const existing = await prisma.opportunity.findFirst({
-      where: { ean: product.ean, source: LIVE_SOURCE },
-    });
-    if (existing) {
-      await prisma.opportunity.update({ where: { id: existing.id }, data });
+    } else if ("error" in s.value) {
+      errors.push({ product: name, error: s.value.error });
     } else {
-      await prisma.opportunity.create({ data });
+      results.push(s.value);
     }
-  }
+  });
 
   return { count: results.length, skipped, errors, results };
 }

@@ -2,7 +2,15 @@ export type ScrapedOffer = {
   price: number;
   url: string;
   title?: string;
+  sourceName?: string;
 };
+
+export type SourceResult = {
+  offer: ScrapedOffer | null;
+  error?: string;
+};
+
+export type ScanError = { product: string; error: string };
 
 export type ScrapeResult = {
   productName: string;
@@ -18,6 +26,7 @@ export type RefProduct = {
   ean: string;
   query: string;
   image: string;
+  asin?: string;
 };
 
 // Produits de référence suivis par le scanner (recherche par EAN/nom)

@@ -1,45 +1,38 @@
-// Requêtes HTTP "navigateur" : headers réalistes, timeout, détection anti-bot.
-// Volume volontairement faible (catalogue < 10 produits, cache DB 1 h).
-const HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.5",
-  "Cache-Control": "no-cache",
-  "Upgrade-Insecure-Requests": "1",
-};
+// Client HTTP des sources LIVE : timeout 8 s, log détaillé, pas de retry.
+// Aucun fallback mock ici : en MODE=LIVE une source en échec retourne une
+// erreur explicite, jamais de fausse donnée.
+const TIMEOUT_MS = 8000;
 
-const BOT_MARKERS = [
-  "captcha",
-  "api-services-support@amazon.com",
-  "datadome",
-  "Access Denied",
-  "blocked",
-];
+export type FetchJsonResult<T> = { data: T | null; error?: string };
 
-export async function fetchHtml(url: string): Promise<string | null> {
+export async function fetchJson<T>(source: string, url: string): Promise<FetchJsonResult<T>> {
+  const safeUrl = url.replace(/(key|api_key)=[^&]+/gi, "$1=***");
   try {
     const res = await fetch(url, {
-      headers: HEADERS,
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
       cache: "no-store",
-      redirect: "follow",
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-    const head = html.slice(0, 4000).toLowerCase();
-    if (BOT_MARKERS.some((m) => head.includes(m.toLowerCase()))) return null;
-    return html;
-  } catch {
-    return null;
+    if (!res.ok) {
+      const error = `HTTP_${res.status}_${res.statusText || "error"}`;
+      console.log("[SCRAPER]", source, safeUrl, res.status, error);
+      return { data: null, error };
+    }
+    const data = (await res.json()) as T;
+    console.log("[SCRAPER]", source, safeUrl, res.status, "OK");
+    return { data };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const error = msg.includes("timeout") || msg.includes("aborted") ? `TIMEOUT_${TIMEOUT_MS}ms` : `FETCH_${msg}`;
+    console.log("[SCRAPER]", source, safeUrl, 0, error);
+    return { data: null, error };
   }
 }
 
-// "92,79 €" | "1 299,00 €" | "92.79" -> number
-export function parsePrice(raw: string): number | null {
+// "92,79 €" | "1 299,00 €" | 92.79 -> number
+export function parsePrice(raw: string | number): number | null {
+  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
   const cleaned = raw
-    .replace(/ | /g, "")
+    .replace(/ | /g, "")
     .replace(/[^\d,.]/g, "")
     .replace(/\.(?=\d{3}(\D|$))/g, "")
     .replace(",", ".");
