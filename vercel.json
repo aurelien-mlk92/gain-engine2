@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/scan", "schedule": "0 8 * * *" },
+    { "path": "/api/scan?limit=2", "schedule": "0 8 * * *" },
     { "path": "/api/cron/trade", "schedule": "0 9 * * *" },
     { "path": "/api/cron/alpha", "schedule": "0 10 * * *" }
   ]

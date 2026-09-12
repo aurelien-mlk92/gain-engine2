@@ -61,7 +61,13 @@ export default function AdminPage() {
   const scanNow = async () => {
     setScanning(true);
     try {
-      await fetch("/api/scan", { method: "POST" });
+      // Le scan est batché (2 produits / appel, budget 10 s Vercel Hobby) :
+      // on enchaîne les batchs jusqu'à épuisement, puis refresh
+      let remaining = 1;
+      for (let i = 0; i < 6 && remaining > 0; i++) {
+        const r = await fetch("/api/scan", { method: "POST" }).then((res) => res.json());
+        remaining = r?.remaining ?? 0;
+      }
       await load();
     } finally {
       setScanning(false);

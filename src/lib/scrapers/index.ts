@@ -12,16 +12,23 @@ function computeScore(diffPercent: number, low: string, high: string): number {
   return Math.max(0, Math.min(100, Math.round(diffPercent * 1.5 + reliability)));
 }
 
-async function scanProduct(product: RefProduct): Promise<ScrapeResult | { skipped: true } | { error: string }> {
-  const fresh = await prisma.opportunity.findFirst({
-    where: {
-      ean: product.ean,
-      source: { startsWith: LIVE_SOURCE_PREFIX },
-      updatedAt: { gte: subHours(new Date(), CACHE_HOURS) },
-    },
-  });
-  if (fresh) return { skipped: true };
+// Limiteur de concurrence maison (équivalent p-limit, sans dépendance)
+function pLimit(concurrency: number) {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= concurrency) await new Promise<void>((res) => queue.push(res));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      queue.shift()?.();
+    }
+  };
+}
 
+async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error: string }> {
   const [low, high] = await Promise.all([scrapeAmazon(product), scrapeManoMano(product)]);
 
   const errs: string[] = [];
@@ -71,20 +78,43 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { skippe
   };
 }
 
-// Scan LIVE : produits en parallèle (allSettled), cache DB 1 h par produit.
-export async function scanLive() {
-  const settled = await Promise.allSettled(CATALOG.map((p) => scanProduct(p)));
+// Scan LIVE par batch : `limit` produits par invocation (budget 10 s Hobby),
+// les moins récemment scannés d'abord. Cache DB 1 h par produit.
+export async function scanLive(limit = 2) {
+  // Dernier scan par EAN (lignes LIVE existantes)
+  const rows = await prisma.opportunity.findMany({
+    where: {
+      ean: { in: CATALOG.map((p) => p.ean) },
+      source: { startsWith: LIVE_SOURCE_PREFIX },
+    },
+    select: { ean: true, updatedAt: true },
+    orderBy: { updatedAt: "asc" },
+  });
+  const lastScanned = new Map<string, Date>();
+  for (const r of rows) if (r.ean) lastScanned.set(r.ean, r.updatedAt); // le plus récent gagne
+
+  const cacheFloor = subHours(new Date(), CACHE_HOURS);
+  const eligible = CATALOG.filter((p) => {
+    const last = lastScanned.get(p.ean);
+    return !last || last < cacheFloor;
+  }).sort(
+    (a, b) => (lastScanned.get(a.ean)?.getTime() ?? 0) - (lastScanned.get(b.ean)?.getTime() ?? 0)
+  );
+
+  const batch = eligible.slice(0, Math.max(1, limit));
+  const skipped = CATALOG.length - eligible.length;
+  const remaining = eligible.length - batch.length;
+  const nextCursor = eligible[batch.length]?.ean ?? null;
+
+  const run = pLimit(3);
+  const settled = await Promise.allSettled(batch.map((p) => run(() => scanProduct(p))));
 
   const results: ScrapeResult[] = [];
   const errors: ScanError[] = [];
-  let skipped = 0;
-
   settled.forEach((s, i) => {
-    const name = CATALOG[i].name;
+    const name = batch[i].name;
     if (s.status === "rejected") {
       errors.push({ product: name, error: `EXCEPTION_${String(s.reason)}` });
-    } else if ("skipped" in s.value) {
-      skipped++;
     } else if ("error" in s.value) {
       errors.push({ product: name, error: s.value.error });
     } else {
@@ -92,5 +122,13 @@ export async function scanLive() {
     }
   });
 
-  return { count: results.length, skipped, errors, results };
+  return {
+    count: results.length,
+    skipped,
+    scanned: batch.map((p) => p.name),
+    remaining,
+    nextCursor,
+    errors,
+    results,
+  };
 }
