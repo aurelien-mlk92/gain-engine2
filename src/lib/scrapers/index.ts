@@ -28,18 +28,40 @@ function pLimit(concurrency: number) {
   };
 }
 
+// Estampille CHAQUE tentative (succès ou échec) : c'est ce qui fait tourner
+// la rotation des batchs et empêche de re-scanner le même produit en boucle.
+async function stampScan(ean: string, error: string | null, low?: number, high?: number) {
+  const data = {
+    lastScannedAt: new Date(),
+    lastError: error,
+    lastPriceLow: low ?? null,
+    lastPriceHigh: high ?? null,
+  };
+  await prisma.scanState.upsert({
+    where: { ean },
+    update: data,
+    create: { ean, ...data },
+  });
+}
+
 async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error: string }> {
   const [low, high] = await Promise.all([scrapeAmazon(product), scrapeManoMano(product)]);
 
   const errs: string[] = [];
   if (!low.offer) errs.push(`amazon KO (${low.error})`);
   if (!high.offer) errs.push(`comparateur KO (${high.error})`);
-  if (errs.length > 0) return { error: errs.join(", ") };
+  if (errs.length > 0) {
+    const error = errs.join(", ");
+    await stampScan(product.ean, error, low.offer?.price, high.offer?.price);
+    return { error };
+  }
 
   const lowOffer = low.offer!;
   const highOffer = high.offer!;
   if (highOffer.price <= lowOffer.price) {
-    return { error: `pas d'écart exploitable (${lowOffer.price}€ vs ${highOffer.price}€)` };
+    const error = `pas d'écart exploitable (${lowOffer.price}€ vs ${highOffer.price}€)`;
+    await stampScan(product.ean, error, lowOffer.price, highOffer.price);
+    return { error };
   }
 
   const highName = highOffer.sourceName ?? "manomano";
@@ -68,6 +90,8 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error:
     await prisma.opportunity.create({ data });
   }
 
+  await stampScan(product.ean, null, lowOffer.price, highOffer.price);
+
   return {
     productName: product.name,
     prixBas: lowOffer.price,
@@ -78,33 +102,26 @@ async function scanProduct(product: RefProduct): Promise<ScrapeResult | { error:
   };
 }
 
-// Scan LIVE par batch : `limit` produits par invocation (budget 10 s Hobby),
-// les moins récemment scannés d'abord. Cache DB 1 h par produit.
+// Scan LIVE par batch : `limit` produits par invocation (budget 10 s Hobby).
+// Tri sur ScanState.lastScannedAt ASC, jamais scannés (NULL) d'abord ;
+// un produit tenté (même en échec) sort de la rotation pendant 1 h.
 export async function scanLive(limit = 2) {
-  // Dernier scan par EAN (lignes LIVE existantes)
-  const rows = await prisma.opportunity.findMany({
-    where: {
-      ean: { in: CATALOG.map((p) => p.ean) },
-      source: { startsWith: LIVE_SOURCE_PREFIX },
-    },
-    select: { ean: true, updatedAt: true },
-    orderBy: { updatedAt: "asc" },
+  const states = await prisma.scanState.findMany({
+    where: { ean: { in: CATALOG.map((p) => p.ean) } },
   });
-  const lastScanned = new Map<string, Date>();
-  for (const r of rows) if (r.ean) lastScanned.set(r.ean, r.updatedAt); // le plus récent gagne
+  const lastMap = new Map(states.map((s) => [s.ean, s.lastScannedAt]));
 
   const cacheFloor = subHours(new Date(), CACHE_HOURS);
   const eligible = CATALOG.filter((p) => {
-    const last = lastScanned.get(p.ean);
+    const last = lastMap.get(p.ean);
     return !last || last < cacheFloor;
   }).sort(
-    (a, b) => (lastScanned.get(a.ean)?.getTime() ?? 0) - (lastScanned.get(b.ean)?.getTime() ?? 0)
+    (a, b) => (lastMap.get(a.ean)?.getTime() ?? 0) - (lastMap.get(b.ean)?.getTime() ?? 0)
   );
 
   const batch = eligible.slice(0, Math.max(1, limit));
   const skipped = CATALOG.length - eligible.length;
   const remaining = eligible.length - batch.length;
-  const nextCursor = eligible[batch.length]?.ean ?? null;
 
   const run = pLimit(3);
   const settled = await Promise.allSettled(batch.map((p) => run(() => scanProduct(p))));
@@ -121,6 +138,13 @@ export async function scanLive(limit = 2) {
       results.push(s.value);
     }
   });
+
+  // Curseur = lastScannedAt du dernier produit traité de ce batch
+  const lastEan = batch[batch.length - 1]?.ean;
+  const lastState = lastEan
+    ? await prisma.scanState.findUnique({ where: { ean: lastEan } })
+    : null;
+  const nextCursor = remaining > 0 ? (lastState?.lastScannedAt.toISOString() ?? null) : null;
 
   return {
     count: results.length,

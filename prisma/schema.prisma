@@ -23,6 +23,14 @@ model Opportunity {
   updatedAt     DateTime @default(now()) @updatedAt
 }
 
+model ScanState {
+  ean           String   @id
+  lastScannedAt DateTime @default(now())
+  lastError     String?
+  lastPriceLow  Float?
+  lastPriceHigh Float?
+}
+
 model Price {
   id        String   @id @default(cuid())
   symbol    String
